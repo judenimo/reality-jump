@@ -120,7 +120,7 @@ curl -i -X POST "http://localhost:3001/api/scene" \
   -F "image=@photo.jpg"
 ```
 
-###AI Structured Response Example in JSON
+### AI Structured Response Example in JSON
 
 ```json
 {
@@ -301,6 +301,7 @@ The `log.js` file sends anonymous usage data to Phaser Studio. To disable:
 **Visit:** [phaser.io](https://phaser.io) | **Discord:** [discord.gg/phaser](https://discord.gg/phaser) | **Docs:** [newdocs.phaser.io](https://newdocs.phaser.io)
 
 Created by [Phaser Studio](mailto:support@phaser.io). The Phaser logo and characters are © 2011 - 2025 Phaser Studio Inc.
+
 
 
 
