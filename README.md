@@ -21,6 +21,7 @@ Generate Phaser.js game with:
 **Current Status: MVP Step 2.5 - Photo Capture & Upload Flow**
 
 The app flow:
+
 1. **Capture**: User takes a photo on mobile device
 2. **Upload**: Photo is compressed and sent to backend
 3. **Generate**: Backend analyzes photo and returns Scene JSON
@@ -43,49 +44,50 @@ Open on mobile: Check terminal for `Network:` URL (e.g., `http://192.168.1.x:808
 
 ## Available Commands
 
-| Command | Description |
-|---------|-------------|
-| `npm install` | Install project dependencies |
-| `npm run dev` | Launch frontend dev server |
+| Command           | Description                        |
+| ----------------- | ---------------------------------- |
+| `npm install`     | Install project dependencies       |
+| `npm run dev`     | Launch frontend dev server         |
 | `npm run dev:all` | Launch frontend + backend together |
-| `npm run server` | Launch backend only (port 3001) |
-| `npm run build` | Create production build |
+| `npm run server`  | Launch backend only (port 3001)    |
+| `npm run build`   | Create production build            |
 
 ## Project Structure
 
 ### Frontend (React + TypeScript)
 
-| Path | Description |
-|------|-------------|
-| `src/App.tsx` | Main app, renders CaptureAndUploadScreen |
-| `src/ui/CaptureAndUploadScreen.tsx` | Orchestrates capture → upload flow |
-| `src/ui/CameraCapture.tsx` | Mobile camera access + image compression |
-| `src/ui/UploadFlow.tsx` | Upload state machine + dev toggles |
-| `src/ui/screens/` | Loading, Success, Error screen components |
-| `src/services/ai_proxy_service.ts` | Backend API client |
-| `src/services/image_processing_service.ts` | Image downscaling utilities |
-| `src/services/request_trace.ts` | Request ID generation for logging |
+| Path                                       | Description                               |
+| ------------------------------------------ | ----------------------------------------- |
+| `src/App.tsx`                              | Main app, renders CaptureAndUploadScreen  |
+| `src/ui/CaptureAndUploadScreen.tsx`        | Orchestrates capture → upload flow        |
+| `src/ui/CameraCapture.tsx`                 | Mobile camera access + image compression  |
+| `src/ui/UploadFlow.tsx`                    | Upload state machine + dev toggles        |
+| `src/ui/screens/`                          | Loading, Success, Error screen components |
+| `src/services/ai_proxy_service.ts`         | Backend API client                        |
+| `src/services/image_processing_service.ts` | Image downscaling utilities               |
+| `src/services/request_trace.ts`            | Request ID generation for logging         |
 
 ### Backend (Express + TypeScript)
 
-| Path | Description |
-|------|-------------|
-| `server/index.ts` | Express server entry point |
+| Path                     | Description                                     |
+| ------------------------ | ----------------------------------------------- |
+| `server/index.ts`        | Express server entry point                      |
 | `server/routes/scene.ts` | POST /api/scene endpoint (dummy implementation) |
-| `server/tsconfig.json` | Backend TypeScript config |
+| `server/tsconfig.json`   | Backend TypeScript config                       |
 
 ### Documentation
 
-| Path | Description |
-|------|-------------|
+| Path                       | Description                            |
+| -------------------------- | -------------------------------------- |
 | `docs/backend_contract.md` | **API specification for backend team** |
-| `docs/testing_upload.md` | Testing guide with curl examples |
+| `docs/testing_upload.md`   | Testing guide with curl examples       |
 
 ## For Backend Developer
 
 **Start here:** `docs/backend_contract.md`
 
 This file contains:
+
 - API endpoint specification (POST /api/scene)
 - Request/response format
 - CORS configuration
@@ -122,91 +124,289 @@ curl -i -X POST "http://localhost:3001/api/scene" \
 
 ### AI Structured Response Example in JSON
 
+## Overview
+
+The AI returns a single JSON object describing detected items in the photo and how each item should behave in-game. Each item is an entry in `objects[]`. The game uses `bounds_normalized` as the source of truth and converts to world coordinates deterministically.
+
+## Top-level
+
 ```json
 {
-  "objects": [
-    {
-      "id": "pillow_01",
-      "type": "platform",
-      "label": "pillow",
-      "bounds": {"x": 120, "y": 340, "width": 200, "height": 80},
-      "properties": {
-        "surface_type": "soft",
-        "friction": 0.3,
-        "bounciness": 0.6,
-        "movement_modifier": 0.5
-      },
-      "game_mechanics": {
-        "player_speed_multiplier": 0.6,
-        "jump_height_modifier": 1.2
-      }
-    },
-    {
-      "id": "apple_01", 
-      "type": "collectible",
-      "label": "apple",
-      "bounds": {"x": 450, "y": 280, "width": 50, "height": 50},
-      "properties": {
-        "category": "food",
-        "edible": true
-      },
-      "game_mechanics": {
-        "spawn_pickup": "health_pack",
-        "health_restore": 20
-      }
-    },
-    {
-      "id": "table_01",
-      "type": "platform", 
-      "label": "table",
-      "bounds": {"x": 300, "y": 400, "width": 600, "height": 30},
-      "properties": {
-        "surface_type": "hard",
-        "material": "wood"
-      },
-      "game_mechanics": {
-        "player_speed_multiplier": 1.0,
-        "is_solid": true
-      }
-    }
-  ]
+  "version": 1,
+  "image": { "width": 4032, "height": 3024 },
+  "objects": []
+}
+
+{
+  "id": "pillow_01",
+  "type": "platform",
+  "label": "pillow",
+  "confidence": 0.78,
+  "bounds_normalized": { "x": 0.15, "y": 0.42, "width": 0.25, "height": 0.10 },
+  "properties": { },
+  "game_mechanics": { }
 }
 ```
 
-**To achieve this, you need to:**
+## Example JSON
 
-1. **Use CUA+SAM** for coordinates and segmentation
-2. **Craft a specialized GPT-4 Vision prompt** that returns this exact JSON structure
+```json
+{
+    "version": 1,
+    "image": { "width": 4032, "height": 3024 },
+    "objects": [
+        {
+            "id": "pillow_01",
+            "type": "platform",
+            "label": "pillow",
+            "confidence": 0.78,
+            "bounds_normalized": {
+                "x": 0.15,
+                "y": 0.42,
+                "width": 0.25,
+                "height": 0.1
+            },
+            "properties": { "surface_type": "soft" },
+            "game_mechanics": {
+                "is_solid": true,
+                "player_speed_multiplier": 0.6,
+                "jump_height_multiplier": 1.2,
+                "friction": 0.3,
+                "bounciness": 0.6
+            }
+        },
+        {
+            "id": "apple_01",
+            "type": "collectible",
+            "label": "apple",
+            "confidence": 0.72,
+            "bounds_normalized": {
+                "x": 0.62,
+                "y": 0.38,
+                "width": 0.06,
+                "height": 0.08
+            },
+            "properties": { "category": "food", "edible": true },
+            "game_mechanics": {
+                "pickup_type": "health_pack",
+                "health_restore": 20
+            }
+        }
+    ]
+}
+```
 
-**Example Prompt:**
+## Object schema
 
-Analyze this image and identify all objects. For each object, return JSON with:
-- Coordinates (if CUA+SAM provides them, use those)
-- Object type: platform/obstacle/collectible/decoration
-- Physical properties: surface_type (soft/hard/slippery/sticky), material, bounciness
-- Game mechanics: How should the player interact? Speed modifiers, jump height changes, spawnable items
+Each entry in `objects[]` must include the following fields:
+
+- `id`  
+  Unique string identifier within the response.
+
+- `type`  
+  One of the allowed object types (see enums below).
+
+- `label`  
+  Human-readable object name (e.g. pillow, table, apple).
+
+- `confidence`  
+  Float between `0.0` and `1.0`.
+
+- `bounds_normalized`  
+  Normalized bounding box.
+
+- `properties`  
+  Descriptive, non-behavioral metadata.
+
+- `game_mechanics`  
+  Gameplay-relevant behavior modifiers.
+
+---
+
+## Normalized bounds (critical)
+
+`bounds_normalized` is the **source of truth**.
+
+Fields:
+
+- `x` – left offset (0.0 → 1.0)
+- `y` – top offset (0.0 → 1.0)
+- `width` – width (0.0 → 1.0)
+- `height` – height (0.0 → 1.0)
 
 Rules:
-- Soft surfaces (pillows, cushions, beds): reduce speed, increase jump
-- Food items: spawn health packs
-- Hard surfaces (tables, floors): normal physics
-- Sharp objects: damage zones
-- Liquids: slow movement zones
 
-Return ONLY valid JSON, no explanation.
+- All values must be floats between `0.0` and `1.0`
+- `(x, y)` is the top-left corner
+- `width` and `height` must be greater than 0
+- The box must fit inside the image:
+    - `x + width <= 1.0`
+    - `y + height <= 1.0`
+
+The game engine converts these values into world coordinates.
+
+## Allowed values for type
+
+Object type enum
+
+- platform
+- obstacle
+- collectible
+- hazard
+- decoration
+
+---
+
+## Property enums
+
+### Surface type (platform / obstacle / hazard)
+
+Allowed values:
+
+- hard
+- soft
+- slippery
+- sticky
+
+---
+
+## Gameplay mechanic enums
+
+### Collectibles
+
+- `pickup_type`:
+    - coin
+    - health_pack
+
+### Hazards
+
+- `damage_type`:
+    - touch_damage
+    - damage_zone
+
+---
+
+## Gameplay value clamping (engine-enforced)
+
+The AI may suggest values, but the game engine must clamp them.
+
+### Movement & physics
+
+- player_speed_multiplier: 0.5 → 1.2
+- jump_height_multiplier: 0.7 → 1.4
+- friction: 0.0 → 1.0
+- bounciness: 0.0 → 0.8
+
+### Collectibles
+
+- health_restore: 0 → 50
+
+### Hazards
+
+- damage_amount: 1 → 50
+- slow_multiplier: 0.4 → 1.0
+
+---
+
+## Type-specific rules
+
+### Platforms
+
+Required:
+
+- properties.surface_type
+
+Allowed mechanics:
+
+- is_solid (boolean, default true)
+- player_speed_multiplier
+- jump_height_multiplier
+- friction
+- bounciness
+
+---
+
+### Obstacles
+
+Allowed mechanics:
+
+- is_solid
+- optional damage_amount
+
+---
+
+### Collectibles
+
+Required:
+
+- game_mechanics.pickup_type
+
+Allowed mechanics:
+
+- health_restore (only if pickup_type is health_pack)
+
+---
+
+### Hazards
+
+Required:
+
+- game_mechanics.damage_type
+- game_mechanics.damage_amount
+
+Allowed mechanics:
+
+- slow_multiplier
+
+---
+
+### Decorations
+
+- No gameplay mechanics required
+- Safe for the engine to ignore
+
+---
+
+## Hard caps (AI must respect)
+
+- Maximum total objects: 25
+- Maximum per type:
+    - platform: 12
+    - obstacle: 8
+    - collectible: 10
+    - hazard: 8
+    - decoration: 25
+
+If more objects are detected, the AI should return the most visually prominent ones.
+
+---
+
+## AI output rules (strict)
+
+- Return valid JSON only
+- No comments, markdown, or explanations
+- Use only enums defined in this document
+- Always include image.width and image.height
+- Prefer normalized bounds
+- Respect all caps and ranges
+
+---
 
 ## Dev Panel (Development Mode)
 
 A floating panel appears in the bottom-right corner during development with these toggles:
 
 **Backend section:**
+
 - **Demo Random**: 50/50 chance to show fake error after real success (for testing error UI)
 - **Mock Fallback**: Try backend first, fall back to mock data on error (for demos)
 
 **No Backend section:**
+
 - **Mock Mode**: Skip backend entirely, always return mock data
 
 **Display:**
+
 - **Image Info**: Show compression stats after photo capture
 
 ## Tech Stack
@@ -216,6 +416,7 @@ A floating panel appears in the bottom-right corner during development with thes
 - **Backend**: Express, Multer (multipart uploads)
 - **Styling**: Vanilla CSS with glassmorphism
 - **Icons**: React Lucide
+
 ---
 
 # Original Phaser Template Documentation
@@ -230,14 +431,14 @@ To communicate between React and Phaser, you can use the **EventBus.js** file. T
 
 ```js
 // In React
-import { EventBus } from './EventBus';
+import { EventBus } from "./EventBus";
 
 // Emit an event
-EventBus.emit('event-name', data);
+EventBus.emit("event-name", data);
 
 // In Phaser
 // Listen for an event
-EventBus.on('event-name', (data) => {
+EventBus.on("event-name", (data) => {
     // Do something with the data
 });
 ```
@@ -251,19 +452,16 @@ In Phaser, the Scene is the lifeblood of your game. It is where you sprites, gam
 **Important**: When you add a new Scene to your game, make sure you expose to React by emitting the `"current-scene-ready"` event via the `EventBus`:
 
 ```ts
-class MyScene extends Phaser.Scene
-{
-    constructor ()
-    {
-        super('MyScene');
+class MyScene extends Phaser.Scene {
+    constructor() {
+        super("MyScene");
     }
 
-    create ()
-    {
+    create() {
         // Your Game Objects and logic here
 
         // At the end of create method:
-        EventBus.emit('current-scene-ready', this);
+        EventBus.emit("current-scene-ready", this);
     }
 }
 ```
@@ -273,16 +471,18 @@ class MyScene extends Phaser.Scene
 Vite supports loading assets via JavaScript module `import` statements.
 
 To embed an asset:
+
 ```js
-import logoImg from './assets/logo.png'
+import logoImg from "./assets/logo.png";
 ```
 
 To load static files, place them in `public/assets`:
+
 ```js
-preload ()
+preload();
 {
-    this.load.image('logo', logoImg);
-    this.load.image('background', 'assets/bg.png');
+    this.load.image("logo", logoImg);
+    this.load.image("background", "assets/bg.png");
 }
 ```
 
@@ -293,6 +493,7 @@ Run `npm run build` to create a production bundle in the `dist` folder. Upload a
 ## About log.js
 
 The `log.js` file sends anonymous usage data to Phaser Studio. To disable:
+
 - Use `npm run dev-nolog` or `npm run build-nolog`
 - Or delete `log.js` and remove references in `package.json`
 
@@ -301,7 +502,3 @@ The `log.js` file sends anonymous usage data to Phaser Studio. To disable:
 **Visit:** [phaser.io](https://phaser.io) | **Discord:** [discord.gg/phaser](https://discord.gg/phaser) | **Docs:** [newdocs.phaser.io](https://newdocs.phaser.io)
 
 Created by [Phaser Studio](mailto:support@phaser.io). The Phaser logo and characters are © 2011 - 2025 Phaser Studio Inc.
-
-
-
-
