@@ -379,6 +379,80 @@ A floating panel appears in the bottom-right corner during development:
 
 ---
 
+## Backend & AI Integration — Open Tasks
+
+> **This is the main remaining work.** The game engine, UI, schema, and validation are all in place. What's missing is replacing the hardcoded mock response with a real AI call that analyzes the uploaded photo.
+
+### What Needs to Happen
+
+1. **Replace hardcoded response with real AI** — `server/routes/scene.ts` currently returns a static JSON blob. It needs to send the uploaded image to an AI model (e.g. GPT-4 Vision, Gemini, etc.), receive structured output, and return it as SceneV1 JSON.
+
+2. **Update `backend_contract.md`** — The doc is **out of date**. It still references `detections[]` and `surfaces[]` fields, but the actual schema uses `objects[]` with `bounds_normalized`. See `docs/ai_scene_schema.md` and `scene_v1.schema.ts` for the real contract.
+
+3. **Update `ai_proxy_service.ts` interface** — The `SceneResponse` interface still lists `detections`, `surfaces` (legacy). This is harmless because Zod validates the real shape, but the interface should match reality for clarity.
+
+4. **Write the AI prompt** — The AI model needs a prompt that tells it to output SceneV1-compatible JSON. It should detect objects in the photo and map them to gameplay roles (platforms, obstacles, collectibles, hazards), assign categories, place player/exit spawns, and suggest pickup/enemy positions. The prompt should reference the schema in `docs/ai_scene_schema.md`.
+
+### What's Already Done (No Changes Needed)
+
+- Zod schema validation (`scene_v1.schema.ts`) — catches any malformed AI output
+- Frontend mock data fallback (`UploadFlow.tsx` → `MOCK_SCENE_RESPONSE`) — works without backend
+- Upload client (`ai_proxy_service.ts` → `uploadImageForScene()`) — sends image, parses JSON
+- Error handling — `ValidationErrorScreen` shows Zod errors, `UploadError` screen handles HTTP failures
+- Dev panel toggles — Mock Mode, Mock Fallback for testing without backend
+
+### Key Files to Read / Modify
+
+| File | Status | What To Do |
+| --- | --- | --- |
+| `server/routes/scene.ts` | **Hardcoded mock** | Replace static JSON with AI model call. Receives `req.file.buffer` (image bytes). Must return SceneV1 JSON. |
+| `docs/ai_scene_schema.md` | **Up to date** | Use this as the reference for the AI prompt. Describes all fields, types, caps, categories, and enemy anchors. |
+| `src/shared/schema/scene_v1.schema.ts` | **Up to date** | Single source of truth for Zod schema. The AI response MUST pass this validation. |
+| `docs/backend_contract.md` | **Outdated** | Still references `detections[]`/`surfaces[]` — needs updating to match `objects[]` with `bounds_normalized`. |
+| `src/services/ai_proxy_service.ts` | **Outdated interface** | `SceneResponse` type lists legacy fields. Harmless (Zod validates), but should be updated for clarity. |
+| `src/ui/UploadFlow.tsx` | **OK** | Contains `MOCK_SCENE_RESPONSE` inline — keep as fallback. No changes needed. |
+| `docs/testing_upload.md` | **Partially outdated** | Example response JSON still uses old field names. Update after `backend_contract.md`. |
+
+### AI Output Requirements (Summary)
+
+The AI model must return JSON matching this structure. All coordinates are **normalized (0.0–1.0)**.
+
+```
+{
+  version: 1                          ← always 1
+  image: { w, h }                     ← original image dimensions
+  objects: [                           ← max 25 total
+    { id, type, label, confidence,
+      bounds_normalized: { x, y, w, h },
+      surface_type?, category?,
+      enemy_spawn_anchor? }
+  ]
+  spawns: {
+    player: { x, y }                  ← required
+    exit: { x, y }                    ← required
+    enemies: [{ x, y, type? }]        ← optional, max 2
+    pickups: [{ x, y, type? }]        ← optional (coin | health)
+  }
+  rules: []                           ← reserved, send empty array
+}
+```
+
+See [`docs/ai_scene_schema.md`](docs/ai_scene_schema.md) for full field documentation with types, caps, and examples.
+
+### Integration Checklist
+
+- [ ] Choose an AI model / API (GPT-4 Vision, Gemini, Claude, etc.)
+- [ ] Write a system prompt referencing `docs/ai_scene_schema.md` schema
+- [ ] Add AI API key management (env vars, not committed)
+- [ ] Implement `server/routes/scene.ts` — send image buffer to AI, parse response
+- [ ] Handle AI errors gracefully (timeout, malformed JSON, rate limits)
+- [ ] Update `docs/backend_contract.md` to match actual SceneV1 schema
+- [ ] Update `SceneResponse` interface in `ai_proxy_service.ts`
+- [ ] Update `docs/testing_upload.md` example responses
+- [ ] Test end-to-end: photo → AI → Zod validation → preview → play
+
+---
+
 ## Phaser Template Reference
 
 This project was bootstrapped from the [Phaser React TypeScript template](https://github.com/phaserjs/template-react-ts).
