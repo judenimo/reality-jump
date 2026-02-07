@@ -4,6 +4,17 @@ A mobile browser game that converts photos into playable game levels using AI-po
 
 ## Project Overview
 
+User uploads photo
+    ↓
+CUA+SAM: Segment all objects/surfaces with coordinates
+    ↓
+GPT-4 Vision: "Table edge = platform, plant = obstacle, mug = coin"
+    ↓
+Generate Phaser.js game with:
+  - Platforms at detected coordinates
+  - Obstacles/collectibles from labeled objects
+  - Physics based on real image layout
+
 **Current Status: MVP Step 2.5 - Photo Capture & Upload Flow**
 
 The app flow:
@@ -126,7 +137,7 @@ A floating panel appears in the bottom-right corner during development with thes
 - **Game Engine**: Phaser 3.90
 - **Backend**: Express, Multer (multipart uploads)
 - **Styling**: Vanilla CSS with glassmorphism
-
+- **Icons**: React Lucide
 ---
 
 # Original Phaser Template Documentation
@@ -212,3 +223,4 @@ The `log.js` file sends anonymous usage data to Phaser Studio. To disable:
 **Visit:** [phaser.io](https://phaser.io) | **Discord:** [discord.gg/phaser](https://discord.gg/phaser) | **Docs:** [newdocs.phaser.io](https://newdocs.phaser.io)
 
 Created by [Phaser Studio](mailto:support@phaser.io). The Phaser logo and characters are © 2011 - 2025 Phaser Studio Inc.
+
