@@ -7,7 +7,9 @@ Built with React, TypeScript, Phaser 3, and Vite.
 ## How It Works
 
 ```
-User takes a photo on mobile
+Splash screen with animated logo
+    ↓
+"Hey Level Designer!" intro card → Take Photo
     ↓
 Photo is compressed and uploaded to backend
     ↓
@@ -21,27 +23,38 @@ Zod validates the response against the SceneV1 schema
 Preview screen shows detected objects overlaid on the photo
     ↓
 Phaser 3 generates a playable platformer level:
+  - Photo background (darkened + blurred for visibility)
   - Platforms placed at detected object coordinates
-  - Pickups and exit spawned from AI-determined locations
+  - Coin stacks and health pickups spawned with animations
+  - Patrolling enemies on platforms
   - Adaptive physics tuned to the level geometry
     ↓
 Player reaches the exit flag → Win!
+Player loses all health → Game Over!
 ```
 
 ## Current Status
 
-**Playable end-to-end.** The full loop works: capture a photo, upload it, preview the detected objects, and play a platformer level generated from the photo.
+**Playable end-to-end.** The full loop works: splash screen → capture a photo → upload it → preview the detected objects → play a platformer level generated from the photo.
 
 **Implemented:**
 
+- Splash screen with animated title and logo (Rubik Mono One font)
+- Landing page with intro card, decorative background SVG, and nav bar
 - Photo capture and compression on mobile
 - Backend upload with request tracing
 - Zod schema validation of AI responses
 - Level preview with debug overlays
-- Platformer gameplay with physics, pickups, scoring, and win condition
+- Platformer gameplay with physics, pickups, scoring, and win/lose conditions
+- Health system (10 HP, enemy damage, health pickups)
+- Enemy AI with platform patrol behavior (edge detection, wall reversal)
+- Surface types including soft platforms (reduced player speed)
+- Animated collectibles (coin stacks bob, health orbits in a circle)
 - Mobile touch controls + keyboard support
 - Adaptive jump height based on level geometry
+- Reachability guardrail with bridge platform insertion
 - Runtime icon generation (no external game assets needed)
+- Photo background with blur + dark overlay for gameplay visibility
 
 **Not yet implemented:**
 
@@ -78,12 +91,14 @@ Open on mobile: Check terminal for `Network:` URL (e.g., `http://192.168.1.x:808
 
 ## Game Flow
 
-1. **Capture** - User takes a photo using the mobile camera
-2. **Upload** - Photo is compressed (max 1024px, JPEG 0.75) and sent to the backend
-3. **Validate** - Backend response is validated against the Zod SceneV1 schema
-4. **Preview** - Detected objects are shown overlaid on the photo with color-coded bounding boxes
-5. **Play** - Phaser creates a platformer level; player navigates platforms, collects pickups, avoids enemies, reaches the exit
-6. **Win/Lose** - Win by reaching the exit flag. Lose if health reaches 0. Score screen with options to replay or take a new photo
+1. **Splash** - Animated title screen with "Reality Jump" logo (3 seconds, fades out)
+2. **Capture** - "Hey Level Designer!" intro card with Take Photo button; decorative SVG background
+3. **Preview** - Photo preview with retake option
+4. **Upload** - Photo is compressed (max 1024px, JPEG 0.75) and sent to the backend
+5. **Validate** - Backend response is validated against the Zod SceneV1 schema
+6. **Scene Preview** - Detected objects shown overlaid on the photo with color-coded bounding boxes
+7. **Play** - Phaser creates a platformer level; player navigates platforms, collects pickups, avoids patrolling enemies, reaches the exit
+8. **Win/Lose** - Win by reaching the exit flag. Lose if health reaches 0. Score screen with options to replay or take a new photo
 
 ## Project Structure
 
@@ -91,15 +106,15 @@ Open on mobile: Check terminal for `Network:` URL (e.g., `http://192.168.1.x:808
 
 | Path | Description |
 | --- | --- |
-| `src/App.tsx` | Root component, renders CaptureAndUploadScreen |
-| `src/ui/CaptureAndUploadScreen.tsx` | Orchestrates the capture → upload flow |
-| `src/ui/CaptureScreen.tsx` | Photo capture interface |
+| `src/App.tsx` | Root component, manages splash → capture screen flow |
+| `src/ui/SplashScreen.tsx` | Animated title screen with fade transition |
+| `src/ui/SplashLogo.tsx` | SVG logo component (used in splash + nav + background) |
+| `src/ui/CaptureAndUploadScreen.tsx` | Orchestrates the capture → upload flow with nav bar |
 | `src/ui/CameraCapture.tsx` | Mobile camera access + image compression |
 | `src/ui/UploadFlow.tsx` | Upload state machine (idle → loading → success/error) |
 | `src/ui/PreviewScreen.tsx` | Level preview with debug toggle overlay |
-| `src/ui/PlayScreen.tsx` | Gameplay screen with score display |
-| `src/ui/MobileControls.tsx` | Touch-friendly left/right/jump buttons |
-| `src/ui/WinOverlay.tsx` | Victory screen with score and replay options |
+| `src/ui/PlayScreen.tsx` | Gameplay screen with score and health display |
+| `src/ui/MobileControls.tsx` | Touch-friendly left/right/jump buttons (disableable) |
 | `src/ui/ValidationErrorScreen.tsx` | Displays Zod validation errors |
 | `src/ui/GameContainer.tsx` | Wraps the Phaser game instance |
 | `src/ui/screens/` | Loading, Success, Error screen components |
@@ -108,23 +123,21 @@ Open on mobile: Check terminal for `Network:` URL (e.g., `http://192.168.1.x:808
 
 | Path | Description |
 | --- | --- |
-| `src/game/scenes/GameScene.ts` | Main gameplay scene - physics, player, platforms, pickups, exit |
+| `src/game/scenes/GameScene.ts` | Main gameplay scene - physics, player, platforms, pickups, enemies, exit |
 | `src/game/scenes/PreviewScene.ts` | Preview scene - renders debug overlays on photo |
-| `src/game/factories/PlatformFactory.ts` | Creates static platform zones from scene data |
+| `src/game/factories/PlatformFactory.ts` | Creates slim platform zones with surface-type colors |
 | `src/game/factories/PlayerFactory.ts` | Creates the player sprite with collision body |
-| `src/game/factories/PickupFactory.ts` | Creates coin and health pickup sprites |
+| `src/game/factories/PickupFactory.ts` | Creates coin stacks (bob animation) and health pickups (orbit animation) |
 | `src/game/factories/ExitFactory.ts` | Creates the exit flag goal sprite |
-| `src/game/factories/EnemyFactory.ts` | Creates enemy sprites from spawn data |
+| `src/game/factories/EnemyFactory.ts` | Creates patrolling enemy sprites with edge detection |
+| `src/game/assets/game_icons.ts` | Centralized icon registry (semantic role → Lucide icon mapping) |
 | `src/game/assets/IconTextureFactory.ts` | Runtime Canvas-based sprite generation (no external assets) |
-| `src/game/assets/lucide_icon_map.ts` | SVG path data for game icons |
-| `src/game/physics/PhysicsConfig.ts` | Adaptive physics calculations (jump height, speed) |
-| `src/game/physics/CollisionLayers.ts` | Collision layer definitions |
+| `src/game/physics/PhysicsConfig.ts` | Adaptive physics calculations (jump height, speed, sizes) |
+| `src/game/physics/ReachabilityCheck.ts` | BFS-based path validation with bridge platform insertion |
+| `src/game/FeatureFlags.ts` | Runtime feature toggles (platform bounce) |
 | `src/game/input/InputState.ts` | Shared input state between React and Phaser |
 | `src/game/utils/coords.ts` | Normalized → world coordinate conversion |
-| `src/game/debug/DebugOverlay.ts` | Debug bounding box and spawn marker rendering |
-| `src/game/debug/DebugRenderer.ts` | Debug rendering utilities |
 | `src/game/events/EventBus.ts` | React ↔ Phaser event bridge |
-| `src/game/events/GameEvents.ts` | Game event type definitions |
 
 ### Shared Schema & Types
 
@@ -134,7 +147,6 @@ Open on mobile: Check terminal for `Network:` URL (e.g., `http://192.168.1.x:808
 | `src/shared/schema/scene_v1.types.ts` | Re-export shim (backward compat) — delegates to schema.ts |
 | `src/shared/schema/SceneV1.ts` | Re-export shim (backward compat) — delegates to schema.ts |
 | `src/shared/schema/scene_v1.schema.test.ts` | Schema validation tests |
-| `src/shared/types/` | Type stubs (Detection, RuleModifier, Spawn, Surface) |
 
 ### Services
 
@@ -151,19 +163,6 @@ Open on mobile: Check terminal for `Network:` URL (e.g., `http://192.168.1.x:808
 | `server/index.ts` | Express server (port 3001), CORS, health check |
 | `server/routes/scene.ts` | `POST /api/scene` - multipart upload, returns hardcoded scene JSON |
 | `server/tsconfig.json` | Backend TypeScript config |
-
-### Stub Files (Planned Architecture)
-
-These files exist but are currently empty, representing planned ECS-style systems:
-
-| Path | Description |
-| --- | --- |
-| `src/game/systems/` | CollisionSystem, EnemySystem, MovementSystem, RuleModifiersSystem, SpawnSystem |
-| `src/game/entities/` | Player, Enemy, Pickup entity classes |
-| `src/game/generation/` | SceneGenerator, PlatformDeriver, SeededRng |
-| `src/game/state/` | GameStateMachine |
-| `src/game/controllers/` | GameFlowController |
-| `src/game/scenes/` (stubs) | BootScene, CaptureScene, GenerateScene, EndScene, PlayScene |
 
 ### Documentation
 
@@ -195,6 +194,15 @@ The AI returns a JSON object describing detected objects and spawn points. All c
       "confidence": 0.85,
       "bounds_normalized": { "x": 0.1, "y": 0.6, "w": 0.4, "h": 0.05 },
       "surface_type": "solid",
+      "category": "furniture"
+    },
+    {
+      "id": "cushion_01",
+      "type": "platform",
+      "label": "cushion",
+      "confidence": 0.88,
+      "bounds_normalized": { "x": 0.55, "y": 0.55, "w": 0.35, "h": 0.05 },
+      "surface_type": "soft",
       "category": "furniture"
     },
     {
@@ -243,18 +251,36 @@ Objects with `category: "plant"` or `"electric"` (or explicit `enemy_spawn_ancho
 
 ### Surface Types
 
-`solid`, `bouncy`, `slippery`, `breakable`
+| Surface | Color | Effect |
+| --- | --- | --- |
+| `solid` | Green | Normal movement and jumping |
+| `soft` | Purple | 60% movement speed, normal jump |
+| `bouncy` | Yellow | *(planned)* |
+| `slippery` | Blue | *(planned)* |
+| `breakable` | Red | *(planned)* |
 
 ### Pickup Types
 
-`coin` (+1 score), `health` (+5 score)
+| Type | Animation | Effect |
+| --- | --- | --- |
+| `coin` | Stacked pair, bobbing up/down | +1 score per coin |
+| `health` | Orbits in a small circle | +5 HP (capped at 10, no score) |
 
 ### Health System
 
 - Player starts with **10 HP**
 - Enemy contact deals **2 damage** (with 1 second invulnerability cooldown)
+- Health pickups restore **5 HP** (capped at 10; ignored if already full)
 - Health reaches 0 → Game Over
-- HP displayed in header next to score (turns red when low)
+- HP displayed in header next to score (turns red when HP ≤ 2)
+
+### Enemy Behavior
+
+- Enemies use the **Angry** Lucide icon (stroke-only, red)
+- Spawn at designated positions and fall with gravity until landing
+- **Patrol** back and forth on their platform at 9% world width per second
+- Reverse direction at platform edges (never fall off) and walls
+- Contact deals 2 damage with a red flash on the player
 
 ## For Backend Developer
 
@@ -301,11 +327,19 @@ src/services/
 
 ### Runtime Icon Generation
 
-Game sprites (player, exit, coin, health) are generated at runtime using the Canvas 2D API. No external image assets are needed for gameplay -- the `IconTextureFactory` draws shapes programmatically and caches them in Phaser's texture manager.
+Game sprites (player, exit, coin, health, enemy) are generated at runtime using the Canvas 2D API. No external image assets are needed for gameplay — the `IconTextureFactory` draws Lucide icon paths programmatically and caches them in Phaser's texture manager. Icon mappings are centralized in `game_icons.ts`.
 
 ### Adaptive Physics
 
 Jump height automatically adapts to the level geometry. The engine analyzes the largest vertical gap between platforms and sets jump height to clear it with a 15% margin (clamped between 15-45% of world height). This ensures every generated level is completable.
+
+### Reachability Guardrail
+
+After platforms are placed, a BFS-based reachability check validates that the player can reach the exit. If not, "bridge" platforms are automatically inserted at strategic points (up to 10 retries). Bridge platforms are visually distinct (blue).
+
+### Photo Background
+
+The captured photo is used as the game background with reduced alpha (50%), a blur post-processing effect, and a dark overlay (25% black) for better contrast against game elements.
 
 ### Normalized Coordinates
 
@@ -339,8 +373,9 @@ A floating panel appears in the bottom-right corner during development:
 | **Validation** | Zod |
 | **Backend** | Express, Multer (multipart uploads) |
 | **Testing** | Vitest |
-| **Styling** | Vanilla CSS with glassmorphism |
+| **Styling** | Vanilla CSS with glassmorphism, Verdana font |
 | **Icons** | Lucide React (UI), Canvas-drawn (game) |
+| **Fonts** | Rubik Mono One (logo), Verdana (body) |
 
 ---
 
