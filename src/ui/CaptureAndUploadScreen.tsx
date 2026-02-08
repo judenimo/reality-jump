@@ -140,8 +140,12 @@ export function CaptureAndUploadScreen() {
         }
     };
 
-    // Hide dev panel during Phaser preview (PreviewScreen has its own debug toggle)
-    const showDevPanel = isDev && currentStep !== 'phaser_preview' && currentStep !== 'validationError';
+    // Hide dev panel during Phaser preview/play and validation errors
+    const showDevPanel = isDev
+        && currentStep !== 'phaser_preview'
+        && currentStep !== 'validationError'
+        && flowState !== 'play'
+        && flowState !== 'preview';
 
     return (
         <div className="capture-upload-screen">

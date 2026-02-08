@@ -44,14 +44,14 @@ const RATIOS = {
     gravityMultiplier: 1.2,
 
     /** Fallback jump height when no scene data is available */
-    defaultJumpHeightFraction: 0.35,
+    defaultJumpHeightFraction: 0.45,
 
-    /** Extra headroom added on top of the largest gap (fraction, e.g. 0.15 = 15%) */
-    jumpMargin: 0.15,
+    /** Extra headroom added on top of the largest gap (fraction, e.g. 0.25 = 25%) */
+    jumpMargin: 0.25,
 
     /** Absolute min/max for the adaptive jump fraction */
-    minJumpFraction: 0.15,
-    maxJumpFraction: 0.45,
+    minJumpFraction: 0.25,
+    maxJumpFraction: 0.55,
 
     /** Player horizontal speed — fraction of worldW per second */
     speedFraction: 0.40,
@@ -134,6 +134,7 @@ export interface ComputedPhysics {
     gravityY: number;
     playerSpeed: number;
     jumpVelocity: number;
+    maxJumpHeight: number;
     playerSizePx: number;
     playerBodyWidth: number;
     playerBodyHeight: number;
@@ -179,6 +180,7 @@ export function computePhysics(
         gravityY,
         playerSpeed,
         jumpVelocity,
+        maxJumpHeight: jumpH,
         playerSizePx,
         playerBodyWidth: Math.round(playerSizePx * RATIOS.bodyWidthRatio),
         playerBodyHeight: Math.round(playerSizePx * RATIOS.bodyHeightRatio),
