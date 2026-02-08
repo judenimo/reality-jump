@@ -44,14 +44,14 @@ const RATIOS = {
     gravityMultiplier: 1.2,
 
     /** Fallback jump height when no scene data is available */
-    defaultJumpHeightFraction: 0.35,
+    defaultJumpHeightFraction: 0.45,
 
     /** Extra headroom added on top of the largest gap (fraction, e.g. 0.15 = 15%) */
-    jumpMargin: 0.15,
+    jumpMargin: 0.20,
 
     /** Absolute min/max for the adaptive jump fraction */
-    minJumpFraction: 0.15,
-    maxJumpFraction: 0.45,
+    minJumpFraction: 0.25,
+    maxJumpFraction: 0.55,
 
     /** Player horizontal speed — fraction of worldW per second */
     speedFraction: 0.40,
