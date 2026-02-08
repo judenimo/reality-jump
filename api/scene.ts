@@ -1,15 +1,11 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import formidable from 'formidable';
-import { readFileSync } from 'fs';
-import OpenAI from 'openai';
+import { Readable } from 'stream';
 import { buildLevel, DetectionResponse } from '../server/levelBuilder';
 
-const openai = new OpenAI(); // reads OPENAI_API_KEY from env
-
 export const config = {
-    maxDuration: 60, // seconds — Hobby plan caps at 10s, Pro allows up to 60s
+    maxDuration: 60,
     api: {
-        bodyParser: false, // disable body parsing so formidable can handle multipart
+        bodyParser: false,
     },
 };
 
@@ -41,31 +37,57 @@ RULES:
 - category must be one of: furniture, food, plant, electric, other.
 - Prefer detecting flat horizontal surfaces (tables, shelves, counters, desks, books, window sills) — these are the most important objects.`;
 
-function parseMultipart(req: VercelRequest): Promise<{ buffer: Buffer; mimetype: string }> {
+/**
+ * Read raw request body as a Buffer.
+ */
+function getRawBody(req: VercelRequest): Promise<Buffer> {
     return new Promise((resolve, reject) => {
-        // Handle formidable v3 CJS/ESM interop — bundlers may wrap the default export
-        const makeForm = typeof formidable === 'function'
-            ? formidable
-            : (formidable as any).default ?? (formidable as any).formidable;
-
-        const form = makeForm({
-            maxFileSize: 10 * 1024 * 1024,
-            filter: (part) => part.mimetype?.startsWith('image/') ?? false,
-        });
-
-        form.parse(req, (err, _fields, files) => {
-            if (err) return reject(err);
-
-            const uploaded = files.image;
-            if (!uploaded) return reject(new Error('No image field'));
-
-            const file = Array.isArray(uploaded) ? uploaded[0] : uploaded;
-            if (!file) return reject(new Error('No image file'));
-
-            const buffer = readFileSync(file.filepath);
-            resolve({ buffer, mimetype: file.mimetype || 'image/jpeg' });
-        });
+        const chunks: Buffer[] = [];
+        const stream = req as unknown as Readable;
+        stream.on('data', (chunk: Buffer) => chunks.push(chunk));
+        stream.on('end', () => resolve(Buffer.concat(chunks)));
+        stream.on('error', reject);
     });
+}
+
+/**
+ * Extract the image from a multipart/form-data body.
+ * Zero external dependencies — parses the boundary manually.
+ */
+function extractImageFromMultipart(body: Buffer, contentType: string): { buffer: Buffer; mimetype: string } {
+    const boundaryMatch = contentType.match(/boundary=(?:"([^"]+)"|([^\s;]+))/);
+    if (!boundaryMatch) throw new Error('No multipart boundary found');
+    const boundary = boundaryMatch[1] || boundaryMatch[2];
+
+    const bodyStr = body.toString('binary');
+    const parts = bodyStr.split(`--${boundary}`);
+
+    for (const part of parts) {
+        if (part.trim() === '' || part.trim() === '--') continue;
+
+        const headerEnd = part.indexOf('\r\n\r\n');
+        if (headerEnd === -1) continue;
+
+        const headers = part.substring(0, headerEnd);
+        const content = part.substring(headerEnd + 4);
+
+        if (headers.includes('name="image"') && headers.includes('Content-Type:')) {
+            const mimeMatch = headers.match(/Content-Type:\s*([^\r\n]+)/i);
+            const mimetype = mimeMatch ? mimeMatch[1].trim() : 'image/jpeg';
+
+            let imageData = content;
+            if (imageData.endsWith('\r\n')) {
+                imageData = imageData.slice(0, -2);
+            }
+
+            return {
+                buffer: Buffer.from(imageData, 'binary'),
+                mimetype,
+            };
+        }
+    }
+
+    throw new Error('No image field found in multipart body');
 }
 
 /**
@@ -74,6 +96,15 @@ function parseMultipart(req: VercelRequest): Promise<{ buffer: Buffer; mimetype:
  * 2) Deterministic level builder creates a playable SceneV1
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+    // CORS headers for deployed domain
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-request-id');
+
+    if (req.method === 'OPTIONS') {
+        return res.status(204).end();
+    }
+
     if (req.method !== 'POST') {
         return res.status(405).json({ error: 'Method not allowed' });
     }
@@ -87,7 +118,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const timestamp = new Date().toISOString();
 
     try {
-        const { buffer, mimetype } = await parseMultipart(req);
+        // Parse multipart body manually (no formidable — avoids CJS/ESM bundler issues)
+        const rawBody = await getRawBody(req);
+        const contentType = req.headers['content-type'] || '';
+        const { buffer, mimetype } = extractImageFromMultipart(rawBody, contentType);
         console.log(`[${timestamp}] request=${requestId} image size=${buffer.length} type=${mimetype}`);
 
         const base64Image = buffer.toString('base64');
@@ -95,6 +129,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         // === AI: Detect objects in the photo ===
         console.log(`[${timestamp}] request=${requestId} sending to GPT-4o for object detection...`);
+
+        // Lazy-import OpenAI inside the handler to avoid crashing at module load
+        // if OPENAI_API_KEY is missing from the environment
+        const OpenAI = (await import('openai')).default;
+        const openai = new OpenAI();
 
         const completion = await openai.chat.completions.create({
             model: 'gpt-4o',
