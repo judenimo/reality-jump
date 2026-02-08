@@ -1,27 +1,13 @@
-import { Router, Request, Response } from 'express';
-import multer from 'multer';
-import OpenAI from 'openai';
-import { buildLevel, DetectionResponse } from '../levelBuilder';
+import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { Readable } from 'stream';
+import { buildLevel, DetectionResponse } from './levelBuilder';
 
-const openai = new OpenAI(); // reads OPENAI_API_KEY from env
-
-// Configure multer to store files in memory (no disk storage)
-const upload = multer({
-    storage: multer.memoryStorage(),
-    limits: {
-        fileSize: 10 * 1024 * 1024, // 10MB max file size
+export const config = {
+    maxDuration: 60,
+    api: {
+        bodyParser: false,
     },
-    fileFilter: (_req, file, cb) => {
-        // Accept only image files
-        if (file.mimetype.startsWith('image/')) {
-            cb(null, true);
-        } else {
-            cb(new Error('Only image files are allowed'));
-        }
-    },
-});
-
-export const sceneRouter = Router();
+};
 
 // AI prompt: detection ONLY — no gameplay decisions
 const DETECTION_PROMPT = `You are an object detection AI. You receive a photo and detect objects in it.
@@ -52,34 +38,102 @@ RULES:
 - Prefer detecting flat horizontal surfaces (tables, shelves, counters, desks, books, window sills) — these are the most important objects.`;
 
 /**
+ * Read raw request body as a Buffer.
+ */
+function getRawBody(req: VercelRequest): Promise<Buffer> {
+    return new Promise((resolve, reject) => {
+        const chunks: Buffer[] = [];
+        const stream = req as unknown as Readable;
+        stream.on('data', (chunk: Buffer) => chunks.push(chunk));
+        stream.on('end', () => resolve(Buffer.concat(chunks)));
+        stream.on('error', reject);
+    });
+}
+
+/**
+ * Extract the image from a multipart/form-data body.
+ * Zero external dependencies — parses the boundary manually.
+ */
+function extractImageFromMultipart(body: Buffer, contentType: string): { buffer: Buffer; mimetype: string } {
+    const boundaryMatch = contentType.match(/boundary=(?:"([^"]+)"|([^\s;]+))/);
+    if (!boundaryMatch) throw new Error('No multipart boundary found');
+    const boundary = boundaryMatch[1] || boundaryMatch[2];
+
+    const bodyStr = body.toString('binary');
+    const parts = bodyStr.split(`--${boundary}`);
+
+    for (const part of parts) {
+        if (part.trim() === '' || part.trim() === '--') continue;
+
+        const headerEnd = part.indexOf('\r\n\r\n');
+        if (headerEnd === -1) continue;
+
+        const headers = part.substring(0, headerEnd);
+        const content = part.substring(headerEnd + 4);
+
+        if (headers.includes('name="image"') && headers.includes('Content-Type:')) {
+            const mimeMatch = headers.match(/Content-Type:\s*([^\r\n]+)/i);
+            const mimetype = mimeMatch ? mimeMatch[1].trim() : 'image/jpeg';
+
+            let imageData = content;
+            if (imageData.endsWith('\r\n')) {
+                imageData = imageData.slice(0, -2);
+            }
+
+            return {
+                buffer: Buffer.from(imageData, 'binary'),
+                mimetype,
+            };
+        }
+    }
+
+    throw new Error('No image field found in multipart body');
+}
+
+/**
  * POST /api/scene
- * Accepts multipart/form-data with an "image" field
  * 1) AI detects objects in the photo
  * 2) Deterministic level builder creates a playable SceneV1
  */
-sceneRouter.post('/', upload.single('image'), async (req: Request, res: Response) => {
-    const file = req.file;
-    const requestId = req.headers['x-request-id'] || 'no-request-id';
-    const timestamp = new Date().toISOString();
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+    // CORS headers for deployed domain
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-request-id');
 
-    if (!file) {
-        console.log(`[${timestamp}] request=${requestId} error=no_image`);
-        res.status(400).json({
-            error: 'No image file provided',
-            hint: 'Send a multipart/form-data request with field name "image"',
-        });
-        return;
+    if (req.method === 'OPTIONS') {
+        return res.status(204).end();
     }
 
-    console.log(`[${timestamp}] request=${requestId} received image size=${file.size} type=${file.mimetype}`);
+    if (req.method !== 'POST') {
+        return res.status(405).json({ error: 'Method not allowed' });
+    }
+
+    if (!process.env.OPENAI_API_KEY) {
+        console.error('OPENAI_API_KEY is not set in environment variables');
+        return res.status(500).json({ error: 'Server misconfiguration: missing OPENAI_API_KEY' });
+    }
+
+    const requestId = (req.headers['x-request-id'] as string) || 'no-request-id';
+    const timestamp = new Date().toISOString();
 
     try {
-        const base64Image = file.buffer.toString('base64');
-        const mimeType = file.mimetype || 'image/jpeg';
-        const dataUrl = `data:${mimeType};base64,${base64Image}`;
+        // Parse multipart body manually (no formidable — avoids CJS/ESM bundler issues)
+        const rawBody = await getRawBody(req);
+        const contentType = req.headers['content-type'] || '';
+        const { buffer, mimetype } = extractImageFromMultipart(rawBody, contentType);
+        console.log(`[${timestamp}] request=${requestId} image size=${buffer.length} type=${mimetype}`);
+
+        const base64Image = buffer.toString('base64');
+        const dataUrl = `data:${mimetype};base64,${base64Image}`;
 
         // === AI: Detect objects in the photo ===
         console.log(`[${timestamp}] request=${requestId} sending to GPT-4o for object detection...`);
+
+        // Lazy-import OpenAI inside the handler to avoid crashing at module load
+        // if OPENAI_API_KEY is missing from the environment
+        const OpenAI = (await import('openai')).default;
+        const openai = new OpenAI();
 
         const completion = await openai.chat.completions.create({
             model: 'gpt-4o',
@@ -91,7 +145,7 @@ sceneRouter.post('/', upload.single('image'), async (req: Request, res: Response
                     role: 'user',
                     content: [
                         { type: 'text', text: 'Detect all objects in this photo.' },
-                        { type: 'image_url', image_url: { url: dataUrl, detail: 'high' } },
+                        { type: 'image_url', image_url: { url: dataUrl, detail: 'low' } },
                     ],
                 },
             ],
@@ -100,8 +154,7 @@ sceneRouter.post('/', upload.single('image'), async (req: Request, res: Response
         const raw = completion.choices?.[0]?.message?.content;
         if (!raw) {
             console.error(`[${timestamp}] request=${requestId} empty AI response`);
-            res.status(502).json({ error: 'Empty response from AI' });
-            return;
+            return res.status(502).json({ error: 'Empty response from AI' });
         }
 
         console.log(`[${timestamp}] request=${requestId} AI detection done (${raw.length} chars)`);
@@ -117,20 +170,16 @@ sceneRouter.post('/', upload.single('image'), async (req: Request, res: Response
             detections = JSON.parse(cleaned) as DetectionResponse;
         } catch (parseErr) {
             console.error(`[${timestamp}] request=${requestId} JSON parse error:`, parseErr);
-            console.error(`[${timestamp}] request=${requestId} raw:`, raw);
-            res.status(502).json({
+            return res.status(502).json({
                 error: 'AI returned invalid JSON',
                 details: parseErr instanceof Error ? parseErr.message : 'Unknown parse error',
                 raw: raw.substring(0, 500),
             });
-            return;
         }
 
-        // Validate detections structure minimally
         if (!detections.image || !Array.isArray(detections.detections)) {
             console.error(`[${timestamp}] request=${requestId} invalid detection structure`);
-            res.status(502).json({ error: 'AI returned unexpected structure' });
-            return;
+            return res.status(502).json({ error: 'AI returned unexpected structure' });
         }
 
         console.log(`[${timestamp}] request=${requestId} detected ${detections.detections.length} objects, building level...`);
@@ -141,7 +190,7 @@ sceneRouter.post('/', upload.single('image'), async (req: Request, res: Response
         console.log(`[${timestamp}] request=${requestId} level built: ${scene.objects.length} objects, ${scene.spawns.pickups.length} pickups, ${scene.spawns.enemies.length} enemies`);
 
         // Return scene + raw AI detections for developer mode
-        res.json({
+        return res.status(200).json({
             ...scene,
             _debug: {
                 raw_ai_response: cleaned,
@@ -154,33 +203,12 @@ sceneRouter.post('/', upload.single('image'), async (req: Request, res: Response
         console.error(`[${timestamp}] request=${requestId} error:`, apiErr.message || err);
 
         if (apiErr.status === 429) {
-            res.status(429).json({ error: 'Rate limited by AI provider. Try again shortly.' });
-            return;
+            return res.status(429).json({ error: 'Rate limited by AI provider. Try again shortly.' });
         }
 
-        res.status(500).json({
+        return res.status(500).json({
             error: 'AI processing failed',
             details: apiErr.message || 'Unknown error',
         });
     }
-});
-
-// Error handling middleware for multer errors
-sceneRouter.use((err: Error, _req: Request, res: Response, _next: Function) => {
-    if (err instanceof multer.MulterError) {
-        if (err.code === 'LIMIT_FILE_SIZE') {
-            res.status(413).json({ error: 'File too large. Maximum size is 10MB.' });
-            return;
-        }
-        res.status(400).json({ error: err.message });
-        return;
-    }
-    
-    if (err.message === 'Only image files are allowed') {
-        res.status(415).json({ error: err.message });
-        return;
-    }
-
-    console.error('Server error:', err);
-    res.status(500).json({ error: 'Internal server error' });
-});
+}
