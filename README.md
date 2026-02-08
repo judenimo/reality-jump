@@ -1,368 +1,207 @@
-# Reality Jump - Photo to Platformer Game
+# Reality Jump — Photo to Platformer Game
 
-A mobile browser game that converts real-world photos into playable platformer levels using AI-powered scene generation. Take a photo of your surroundings and watch it transform into a game level where tables become platforms, fruits become collectibles, and everyday objects become obstacles.
+A mobile browser game that converts real-world photos into playable platformer levels using AI vision. Take a photo of your surroundings and watch it transform into a game level where detected objects become platforms, pickups, and enemies.
 
-Built with React, TypeScript, Phaser 3, and Vite.
+Built with React 19, TypeScript, Phaser 3, Vite, OpenAI GPT-4o Vision, and Supabase.
 
 ## How It Works
 
 ```
-Splash screen with animated logo
+Splash screen → "Take a Photo" or "Play Shared Level"
     ↓
-"Hey Level Designer!" intro card → Take Photo
+Photo is compressed and uploaded to the Express backend
     ↓
-Photo is compressed and uploaded to backend
+GPT-4o Vision detects objects in the image (labels, bounding boxes)
     ↓
-AI analyzes the image: detects objects, surfaces, and layout
+Deterministic level builder arranges detections into a zigzag
+staircase of platforms, pickups, enemies, and an exit
     ↓
-Returns Scene JSON with normalized coordinates + game roles
-    (e.g. table edge → platform, apple → collectible, candle → hazard)
+Phaser 3 renders a playable platformer level with the photo as background
     ↓
-Zod validates the response against the SceneV1 schema
-    ↓
-Preview screen shows detected objects overlaid on the photo
-    ↓
-Phaser 3 generates a playable platformer level:
-  - Photo background (darkened + blurred for visibility)
-  - Platforms placed at detected object coordinates
-  - Coin stacks and health pickups spawned with animations
-  - Patrolling enemies on platforms
-  - Adaptive physics tuned to the level geometry
-    ↓
-Player reaches the exit flag → Win!
-Player loses all health → Game Over!
+Player reaches the exit → Win! → Optionally share the level to Supabase
 ```
 
-## Current Status
+---
 
-**Playable end-to-end.** The full loop works: splash screen → capture a photo → upload it → preview the detected objects → play a platformer level generated from the photo.
+## Prerequisites
 
-**Implemented:**
+- **Node.js** ≥ 18 (LTS recommended)
+- **npm** ≥ 9
+- An **OpenAI API key** with GPT-4o access (see setup below)
+- *(Optional)* A **Supabase** project for level sharing (see setup below)
 
-- Splash screen with animated title and logo (Rubik Mono One font)
-- Landing page with intro card, decorative background SVG, and nav bar
-- Photo capture and compression on mobile
-- Backend upload with request tracing
-- Zod schema validation of AI responses
-- Level preview with debug overlays
-- Platformer gameplay with physics, pickups, scoring, and win/lose conditions
-- Health system (10 HP, enemy damage, health pickups)
-- Enemy AI with platform patrol behavior (edge detection, wall reversal)
-- Surface types including soft platforms (reduced player speed)
-- Animated collectibles (coin stacks bob, health orbits in a circle)
-- Mobile touch controls + keyboard support
-- Adaptive jump height based on level geometry
-- Reachability guardrail with bridge platform insertion
-- Runtime icon generation (no external game assets needed)
-- Photo background with blur + dark overlay for gameplay visibility
+---
 
-**Not yet implemented:**
+## Setup
 
-- Obstacle collision
-- ECS-style systems (files exist as stubs)
-- Real AI integration (backend returns hardcoded scene data)
-
-## Quick Start
+### 1. Clone and install
 
 ```bash
-# Install dependencies
+git clone <your-repo-url>
+cd reality-jump
 npm install
+```
 
-# Run frontend only (with mock data for testing)
-npm run dev
+### 2. Create the `.env` file
 
-# Run frontend + backend together
+Copy the template and fill in your keys:
+
+```bash
+cp .env.example .env
+```
+
+Or create `.env` manually in the project root:
+
+```dotenv
+# Required — OpenAI
+OPENAI_API_KEY=sk-proj-YOUR_KEY_HERE
+
+# Optional — Supabase (level sharing)
+VITE_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
+VITE_SUPABASE_ANON_KEY=YOUR_ANON_KEY_HERE
+```
+
+> **`.env` is git-ignored.** Never commit API keys.
+
+---
+
+### 3. Get an OpenAI API key
+
+The backend uses **GPT-4o** (via the OpenAI Node SDK) to detect objects in uploaded photos. You need an API key with access to the `gpt-4o` model.
+
+1. Go to [https://platform.openai.com/signup](https://platform.openai.com/signup) and create an account (or sign in).
+2. Navigate to **API keys**: [https://platform.openai.com/api-keys](https://platform.openai.com/api-keys).
+3. Click **"Create new secret key"**.
+4. Give it a name (e.g. `reality-jump`) and click **Create**.
+5. **Copy the key immediately** — it starts with `sk-proj-...` and is only shown once.
+6. Paste it into your `.env` file:
+   ```dotenv
+   OPENAI_API_KEY=sk-proj-YOUR_KEY_HERE
+   ```
+
+**Billing:** OpenAI requires a payment method. Each photo analysis costs roughly $0.01–0.03 (image tokens). Add credit at [https://platform.openai.com/settings/organization/billing](https://platform.openai.com/settings/organization/billing).
+
+---
+
+### 4. Set up Supabase (optional — for level sharing)
+
+Supabase provides the database and image storage for the "Share Level" feature. If you skip this, the game is fully playable — you just won't be able to share or browse levels.
+
+#### 4a. Create a Supabase project
+
+1. Go to [https://supabase.com](https://supabase.com) and sign up / sign in.
+2. Click **"New Project"**.
+3. Choose an organisation, give the project a name (e.g. `reality-jump`), set a database password, and pick a region close to you.
+4. Click **"Create new project"** and wait for it to provision (~1 minute).
+
+#### 4b. Get your API keys
+
+1. In your Supabase project dashboard, go to **Settings → API** (left sidebar → ⚙️ Settings → API).
+2. Copy these two values into your `.env`:
+
+| Dashboard field | `.env` variable |
+| --- | --- |
+| **Project URL** | `VITE_SUPABASE_URL` |
+| **anon / public** key (under "Project API keys") | `VITE_SUPABASE_ANON_KEY` |
+
+```dotenv
+VITE_SUPABASE_URL=https://abcdefghijklmnop.supabase.co
+VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+#### 4c. Create the `levels` table
+
+1. In the dashboard, go to **SQL Editor** (left sidebar).
+2. Click **"New query"** and paste the following SQL:
+
+```sql
+CREATE TABLE IF NOT EXISTS levels (
+    id          uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+    player_name text        NOT NULL,
+    level_name  text        NOT NULL,
+    scene_data  jsonb       NOT NULL,
+    image_path  text,
+    score       integer     NOT NULL DEFAULT 0,
+    created_at  timestamptz NOT NULL DEFAULT now()
+);
+
+-- Allow anyone to read levels (public browse)
+ALTER TABLE levels ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Public read"  ON levels FOR SELECT USING (true);
+CREATE POLICY "Public insert" ON levels FOR INSERT WITH CHECK (true);
+```
+
+3. Click **"Run"**. You should see `Success. No rows returned`.
+
+#### 4d. Create the `level-images` storage bucket
+
+1. Go to **Storage** (left sidebar).
+2. Click **"New bucket"**.
+3. Name it exactly: `level-images`
+4. Toggle **"Public bucket"** to **ON**.
+5. Click **"Create bucket"**.
+6. Click on the newly created `level-images` bucket.
+7. Go to the **Policies** tab (within the bucket page).
+8. Add two policies:
+
+**Policy 1 — Public read:**
+- Click **"New policy"** → **"For full customization"**.
+- Policy name: `Public read`
+- Allowed operation: **SELECT**
+- Target roles: leave blank (defaults to all)
+- USING expression: `true`
+- Click **"Review"** → **"Save policy"**.
+
+**Policy 2 — Public upload:**
+- Click **"New policy"** → **"For full customization"**.
+- Policy name: `Public upload`
+- Allowed operation: **INSERT**
+- Target roles: leave blank
+- WITH CHECK expression: `true`
+- Click **"Review"** → **"Save policy"**.
+
+That's it — Supabase is ready.
+
+---
+
+### 5. Run the app
+
+```bash
+# Start both the Express backend (port 3001) and Vite frontend (port 8080)
 npm run dev:all
 ```
 
-Open on mobile: Check terminal for `Network:` URL (e.g., `http://192.168.1.x:8080`)
+Open in your browser: [http://localhost:8080](http://localhost:8080)
+
+**On mobile:** Check the terminal output for the `Network:` URL (e.g. `http://192.168.1.x:8080`) and open that on your phone. Both devices must be on the same Wi-Fi network.
+
+---
 
 ## Available Commands
 
-| Command             | Description                        |
-| ------------------- | ---------------------------------- |
-| `npm install`       | Install project dependencies       |
-| `npm run dev`       | Launch frontend dev server         |
-| `npm run dev:all`   | Launch frontend + backend together |
-| `npm run server`    | Launch backend only (port 3001)    |
-| `npm run build`     | Create production build            |
-| `npm run test`      | Run tests (Vitest)                 |
-| `npm run test:watch` | Run tests in watch mode           |
+| Command | Description |
+| --- | --- |
+| `npm install` | Install project dependencies |
+| `npm run dev` | Launch frontend only (Vite, port 8080) |
+| `npm run dev:all` | Launch frontend + backend together |
+| `npm run server` | Launch backend only (Express, port 3001) |
+| `npm run build` | Create production build |
+| `npm run test` | Run tests (Vitest) |
+| `npm run test:watch` | Run tests in watch mode |
+
+---
 
 ## Game Flow
 
-1. **Splash** - Animated title screen with "Reality Jump" logo (3 seconds, fades out)
-2. **Capture** - "Hey Level Designer!" intro card with Take Photo button; decorative SVG background
-3. **Preview** - Photo preview with retake option
-4. **Upload** - Photo is compressed (max 1024px, JPEG 0.75) and sent to the backend
-5. **Validate** - Backend response is validated against the Zod SceneV1 schema
-6. **Scene Preview** - Detected objects shown overlaid on the photo with color-coded bounding boxes
-7. **Play** - Phaser creates a platformer level; player navigates platforms, collects pickups, avoids patrolling enemies, reaches the exit
-8. **Win/Lose** - Win by reaching the exit flag. Lose if health reaches 0. Score screen with options to replay or take a new photo
+1. **Splash** — "Take a Photo" to create a level from your camera, or "Play Shared Level" to browse community levels
+2. **Capture** — Take/upload a photo; it's compressed (max 1024px, JPEG 0.75) and sent to the backend
+3. **AI Detection** — GPT-4o Vision detects objects in the photo (labels, bounding boxes, categories)
+4. **Level Build** — Deterministic builder creates a zigzag staircase level from the detections
+5. **Preview** — Detected objects overlaid on the photo with debug toggle
+6. **Play** — Phaser renders the level; collect coins, avoid enemies, reach the exit flag
+7. **Win/Lose** — Score screen with options to replay, retake photo, or share the level
 
-## Project Structure
-
-### UI Layer (React)
-
-| Path | Description |
-| --- | --- |
-| `src/App.tsx` | Root component, manages splash → capture screen flow |
-| `src/ui/SplashScreen.tsx` | Animated title screen with fade transition |
-| `src/ui/SplashLogo.tsx` | SVG logo component (used in splash + nav + background) |
-| `src/ui/CaptureAndUploadScreen.tsx` | Orchestrates the capture → upload flow with nav bar |
-| `src/ui/CameraCapture.tsx` | Mobile camera access + image compression |
-| `src/ui/UploadFlow.tsx` | Upload state machine (idle → loading → success/error) |
-| `src/ui/PreviewScreen.tsx` | Level preview with debug toggle overlay |
-| `src/ui/PlayScreen.tsx` | Gameplay screen with score and health display |
-| `src/ui/MobileControls.tsx` | Touch-friendly left/right/jump buttons (disableable) |
-| `src/ui/ValidationErrorScreen.tsx` | Displays Zod validation errors |
-| `src/ui/GameContainer.tsx` | Wraps the Phaser game instance |
-| `src/ui/screens/` | Loading, Success, Error screen components |
-
-### Game Engine (Phaser 3)
-
-| Path | Description |
-| --- | --- |
-| `src/game/scenes/GameScene.ts` | Main gameplay scene - physics, player, platforms, pickups, enemies, exit |
-| `src/game/scenes/PreviewScene.ts` | Preview scene - renders debug overlays on photo |
-| `src/game/factories/PlatformFactory.ts` | Creates slim platform zones with surface-type colors |
-| `src/game/factories/PlayerFactory.ts` | Creates the player sprite with collision body |
-| `src/game/factories/PickupFactory.ts` | Creates coin stacks (bob animation) and health pickups (orbit animation) |
-| `src/game/factories/ExitFactory.ts` | Creates the exit flag goal sprite |
-| `src/game/factories/EnemyFactory.ts` | Creates patrolling enemy sprites with edge detection |
-| `src/game/assets/game_icons.ts` | Centralized icon registry (semantic role → Lucide icon mapping) |
-| `src/game/assets/IconTextureFactory.ts` | Runtime Canvas-based sprite generation (no external assets) |
-| `src/game/physics/PhysicsConfig.ts` | Adaptive physics calculations (jump height, speed, sizes) |
-| `src/game/physics/ReachabilityCheck.ts` | BFS-based path validation with bridge platform insertion |
-| `src/game/FeatureFlags.ts` | Runtime feature toggles (platform bounce) |
-| `src/game/input/InputState.ts` | Shared input state between React and Phaser |
-| `src/game/utils/coords.ts` | Normalized → world coordinate conversion |
-| `src/game/events/EventBus.ts` | React ↔ Phaser event bridge |
-
-### Shared Schema & Types
-
-| Path | Description |
-| --- | --- |
-| `src/shared/schema/scene_v1.schema.ts` | **Single source of truth:** Zod schema, TS types, parse helper, enemy anchor helpers |
-| `src/shared/schema/scene_v1.types.ts` | Re-export shim (backward compat) — delegates to schema.ts |
-| `src/shared/schema/SceneV1.ts` | Re-export shim (backward compat) — delegates to schema.ts |
-| `src/shared/schema/scene_v1.schema.test.ts` | Schema validation tests |
-
-### Services
-
-| Path | Description |
-| --- | --- |
-| `src/services/ai_proxy_service.ts` | Backend API client (`uploadImageForScene`) |
-| `src/services/image_processing_service.ts` | Image downscaling (max 1024px, JPEG 0.75) |
-| `src/services/request_trace.ts` | Request ID generation for cross-service logging |
-
-### Backend (Express)
-
-| Path | Description |
-| --- | --- |
-| `server/index.ts` | Express server (port 3001), CORS, health check |
-| `server/routes/scene.ts` | `POST /api/scene` - multipart upload, returns hardcoded scene JSON |
-| `server/tsconfig.json` | Backend TypeScript config |
-
-### Documentation
-
-| Path | Description |
-| --- | --- |
-| `docs/ai_scene_schema.md` | Scene V1 JSON schema documentation |
-| `docs/backend_contract.md` | API specification for backend team |
-| `docs/testing_upload.md` | Testing guide with curl examples |
-
-## Scene Data Format (SceneV1)
-
-> **Full schema documentation:** [`docs/ai_scene_schema.md`](docs/ai_scene_schema.md)
->
-> **Canonical source:** `src/shared/schema/scene_v1.schema.ts`
-
-The AI returns a JSON object describing detected objects and spawn points. All coordinates are **normalized** (0.0 to 1.0).
-
-### Schema Structure
-
-```json
-{
-  "version": 1,
-  "image": { "w": 4032, "h": 3024 },
-  "objects": [
-    {
-      "id": "table_01",
-      "type": "platform",
-      "label": "table",
-      "confidence": 0.85,
-      "bounds_normalized": { "x": 0.1, "y": 0.6, "w": 0.4, "h": 0.05 },
-      "surface_type": "solid",
-      "category": "furniture"
-    },
-    {
-      "id": "cushion_01",
-      "type": "platform",
-      "label": "cushion",
-      "confidence": 0.88,
-      "bounds_normalized": { "x": 0.55, "y": 0.55, "w": 0.35, "h": 0.05 },
-      "surface_type": "soft",
-      "category": "furniture"
-    },
-    {
-      "id": "obs_plant",
-      "type": "obstacle",
-      "label": "plant",
-      "confidence": 0.92,
-      "bounds_normalized": { "x": 0.45, "y": 0.50, "w": 0.08, "h": 0.15 },
-      "category": "plant",
-      "enemy_spawn_anchor": true
-    }
-  ],
-  "spawns": {
-    "player": { "x": 0.1, "y": 0.5 },
-    "exit": { "x": 0.9, "y": 0.3 },
-    "enemies": [{ "x": 0.5, "y": 0.5, "type": "walker" }],
-    "pickups": [{ "x": 0.5, "y": 0.4, "type": "coin" }]
-  },
-  "rules": []
-}
-```
-
-### Object Types & Caps
-
-| Type | Max Count | Description |
-| --- | --- | --- |
-| `platform` | 12 | Surfaces the player can stand on |
-| `obstacle` | 8 | Blocking objects |
-| `collectible` | 10 | Items the player can pick up |
-| `hazard` | 8 | Damage-dealing areas |
-| `enemy` | 2 | Enemy entities |
-
-Maximum total objects: **25**
-
-### Object Categories
-
-| Category | Enemy Spawn Anchor? |
-| --- | --- |
-| `plant` | Yes |
-| `electric` | Yes |
-| `food` | No |
-| `furniture` | No |
-| `other` | No |
-
-Objects with `category: "plant"` or `"electric"` (or explicit `enemy_spawn_anchor: true`) are treated as candidate enemy spawn positions.
-
-### Surface Types
-
-| Surface | Color | Effect |
-| --- | --- | --- |
-| `solid` | Green | Normal movement and jumping |
-| `soft` | Purple | 60% movement speed, normal jump |
-| `bouncy` | Yellow | *(planned)* |
-| `slippery` | Blue | *(planned)* |
-| `breakable` | Red | *(planned)* |
-
-### Pickup Types
-
-| Type | Animation | Effect |
-| --- | --- | --- |
-| `coin` | Stacked pair, bobbing up/down | +1 score per coin |
-| `health` | Orbits in a small circle | +5 HP (capped at 10, no score) |
-
-### Health System
-
-- Player starts with **10 HP**
-- Enemy contact deals **2 damage** (with 1 second invulnerability cooldown)
-- Health pickups restore **5 HP** (capped at 10; ignored if already full)
-- Health reaches 0 → Game Over
-- HP displayed in header next to score (turns red when HP ≤ 2)
-
-### Enemy Behavior
-
-- Enemies use the **Angry** Lucide icon (stroke-only, red)
-- Spawn at designated positions and fall with gravity until landing
-- **Patrol** back and forth on their platform at 9% world width per second
-- Reverse direction at platform edges (never fall off) and walls
-- Contact deals 2 damage with a red flash on the player
-
-## For Backend Developer
-
-**Start here:** `docs/backend_contract.md`
-
-### Quick Test
-
-```bash
-# Start backend
-npm run server
-
-# Test endpoint
-curl -i -X POST "http://localhost:3001/api/scene" \
-  -H "x-request-id: req_TEST" \
-  -F "image=@photo.jpg"
-```
-
-### Backend Files
-
-```
-server/
-├── index.ts              # Express server setup (port 3001)
-├── routes/scene.ts       # POST /api/scene (hardcoded response, replace with AI)
-└── tsconfig.json
-
-docs/
-├── backend_contract.md   # API spec (START HERE)
-└── testing_upload.md     # Testing guide
-
-src/services/
-└── ai_proxy_service.ts   # Frontend client (shows expected API format)
-```
-
-### Endpoint Details
-
-- **Endpoint:** `POST /api/scene`
-- **Content-Type:** `multipart/form-data`
-- **Field:** `image` (max 10MB, image/* only)
-- **Header:** `x-request-id` (optional, for tracing)
-- **Response:** SceneV1 JSON or error JSON
-- **CORS:** `localhost:5173`, `localhost:8080`
-
-## Key Architecture Decisions
-
-### Runtime Icon Generation
-
-Game sprites (player, exit, coin, health, enemy) are generated at runtime using the Canvas 2D API. No external image assets are needed for gameplay — the `IconTextureFactory` draws Lucide icon paths programmatically and caches them in Phaser's texture manager. Icon mappings are centralized in `game_icons.ts`.
-
-### Adaptive Physics
-
-Jump height automatically adapts to the level geometry. The engine analyzes the largest vertical gap between platforms and sets jump height to clear it with a 15% margin (clamped between 15-45% of world height). This ensures every generated level is completable.
-
-### Reachability Guardrail
-
-After platforms are placed, a BFS-based reachability check validates that the player can reach the exit. If not, "bridge" platforms are automatically inserted at strategic points (up to 10 retries). Bridge platforms are visually distinct (blue).
-
-### Photo Background
-
-The captured photo is used as the game background with reduced alpha (50%), a blur post-processing effect, and a dark overlay (25% black) for better contrast against game elements.
-
-### Normalized Coordinates
-
-All positions from the AI use normalized coordinates (0.0 to 1.0). The game world matches the photo's aspect ratio, and `coords.ts` converts normalized values to world pixels. This makes levels work at any resolution.
-
-### React ↔ Phaser Bridge
-
-An `EventBus` (Phaser EventEmitter) bridges React and Phaser. Mobile controls write to a shared `InputState` object that Phaser reads each frame. Game events (`game-won`, `game-lost`, `score-update`, `health-update`, `toggle-debug`) flow from Phaser to React.
-
-### Schema Validation
-
-All backend responses are validated with Zod before reaching the game engine. Invalid data shows a `ValidationErrorScreen` with specific errors rather than crashing.
-
-## Dev Panel (Development Mode)
-
-A floating panel appears in the bottom-right corner during development:
-
-| Toggle | Description |
-| --- | --- |
-| **Demo Random** | 50/50 chance of fake error after real success (test error UI) |
-| **Mock Fallback** | Try backend first, fall back to mock data on error |
-| **Mock Mode** | Skip backend entirely, always return mock data |
-| **Image Info** | Show compression stats after photo capture |
+---
 
 ## Tech Stack
 
@@ -370,116 +209,89 @@ A floating panel appears in the bottom-right corner during development:
 | --- | --- |
 | **Frontend** | React 19, TypeScript 5.7, Vite 6.3 |
 | **Game Engine** | Phaser 3.90 (Arcade Physics) |
+| **AI Vision** | OpenAI GPT-4o (object detection) |
+| **Level Builder** | Deterministic zigzag staircase algorithm |
+| **Database** | Supabase (PostgreSQL + Storage) |
 | **Validation** | Zod |
-| **Backend** | Express, Multer (multipart uploads) |
-| **Testing** | Vitest |
-| **Styling** | Vanilla CSS with glassmorphism, Verdana font |
-| **Icons** | Lucide React (UI), Canvas-drawn (game) |
-| **Fonts** | Rubik Mono One (logo), Verdana (body) |
+| **Backend** | Express 4, Multer (multipart uploads) |
+| **Styling** | Vanilla CSS with glassmorphism |
+| **Icons** | Lucide React (UI), Canvas-drawn (game sprites) |
 
 ---
 
-## Backend & AI Integration — Open Tasks
+## Project Structure
 
-> **This is the main remaining work.** The game engine, UI, schema, and validation are all in place. What's missing is replacing the hardcoded mock response with a real AI call that analyzes the uploaded photo.
+### UI Layer (React)
 
-### What Needs to Happen
+| Path | Description |
+| --- | --- |
+| `src/App.tsx` | Root component — splash / capture / browse / play routing |
+| `src/ui/SplashScreen.tsx` | Home screen with "Take a Photo" and "Play Shared Level" buttons |
+| `src/ui/CaptureAndUploadScreen.tsx` | Orchestrates capture → upload → preview flow |
+| `src/ui/PlayScreen.tsx` | Gameplay screen with score, health, share-on-win |
+| `src/ui/WinOverlay.tsx` | Victory overlay with share form |
+| `src/ui/BrowseLevelsScreen.tsx` | Browse/search shared levels from Supabase |
+| `src/ui/MobileControls.tsx` | Touch-friendly left/right/jump buttons |
 
-1. **Replace hardcoded response with real AI** — `server/routes/scene.ts` currently returns a static JSON blob. It needs to send the uploaded image to an AI model (e.g. GPT-4 Vision, Gemini, etc.), receive structured output, and return it as SceneV1 JSON.
+### Game Engine (Phaser 3)
 
-2. **Update `backend_contract.md`** — The doc is **out of date**. It still references `detections[]` and `surfaces[]` fields, but the actual schema uses `objects[]` with `bounds_normalized`. See `docs/ai_scene_schema.md` and `scene_v1.schema.ts` for the real contract.
+| Path | Description |
+| --- | --- |
+| `src/game/scenes/GameScene.ts` | Main gameplay — physics, player, platforms, pickups, enemies, exit |
+| `src/game/factories/` | Factories for Player, Platform, Pickup, Exit, Enemy sprites |
+| `src/game/assets/IconTextureFactory.ts` | Runtime Canvas-based sprite generation (no external assets) |
+| `src/game/physics/PhysicsConfig.ts` | Adaptive physics (jump height, speed, sizes) |
 
-3. **Update `ai_proxy_service.ts` interface** — The `SceneResponse` interface still lists `detections`, `surfaces` (legacy). This is harmless because Zod validates the real shape, but the interface should match reality for clarity.
+### Backend
 
-4. **Write the AI prompt** — The AI model needs a prompt that tells it to output SceneV1-compatible JSON. It should detect objects in the photo and map them to gameplay roles (platforms, obstacles, collectibles, hazards), assign categories, place player/exit spawns, and suggest pickup/enemy positions. The prompt should reference the schema in `docs/ai_scene_schema.md`.
+| Path | Description |
+| --- | --- |
+| `server/index.ts` | Express server (port 3001), CORS, health check |
+| `server/routes/scene.ts` | `POST /api/scene` — sends photo to GPT-4o, builds level |
+| `server/levelBuilder.ts` | Deterministic level builder (zigzag staircase algorithm) |
 
-### What's Already Done (No Changes Needed)
+### Services
 
-- Zod schema validation (`scene_v1.schema.ts`) — catches any malformed AI output
-- Frontend mock data fallback (`UploadFlow.tsx` → `MOCK_SCENE_RESPONSE`) — works without backend
-- Upload client (`ai_proxy_service.ts` → `uploadImageForScene()`) — sends image, parses JSON
-- Error handling — `ValidationErrorScreen` shows Zod errors, `UploadError` screen handles HTTP failures
-- Dev panel toggles — Mock Mode, Mock Fallback for testing without backend
-
-### Key Files to Read / Modify
-
-| File | Status | What To Do |
-| --- | --- | --- |
-| `server/routes/scene.ts` | **Hardcoded mock** | Replace static JSON with AI model call. Receives `req.file.buffer` (image bytes). Must return SceneV1 JSON. |
-| `docs/ai_scene_schema.md` | **Up to date** | Use this as the reference for the AI prompt. Describes all fields, types, caps, categories, and enemy anchors. |
-| `src/shared/schema/scene_v1.schema.ts` | **Up to date** | Single source of truth for Zod schema. The AI response MUST pass this validation. |
-| `docs/backend_contract.md` | **Outdated** | Still references `detections[]`/`surfaces[]` — needs updating to match `objects[]` with `bounds_normalized`. |
-| `src/services/ai_proxy_service.ts` | **Outdated interface** | `SceneResponse` type lists legacy fields. Harmless (Zod validates), but should be updated for clarity. |
-| `src/ui/UploadFlow.tsx` | **OK** | Contains `MOCK_SCENE_RESPONSE` inline — keep as fallback. No changes needed. |
-| `docs/testing_upload.md` | **Partially outdated** | Example response JSON still uses old field names. Update after `backend_contract.md`. |
-
-### AI Output Requirements (Summary)
-
-The AI model must return JSON matching this structure. All coordinates are **normalized (0.0–1.0)**.
-
-```
-{
-  version: 1                          ← always 1
-  image: { w, h }                     ← original image dimensions
-  objects: [                           ← max 25 total
-    { id, type, label, confidence,
-      bounds_normalized: { x, y, w, h },
-      surface_type?, category?,
-      enemy_spawn_anchor? }
-  ]
-  spawns: {
-    player: { x, y }                  ← required
-    exit: { x, y }                    ← required
-    enemies: [{ x, y, type? }]        ← optional, max 2
-    pickups: [{ x, y, type? }]        ← optional (coin | health)
-  }
-  rules: []                           ← reserved, send empty array
-}
-```
-
-See [`docs/ai_scene_schema.md`](docs/ai_scene_schema.md) for full field documentation with types, caps, and examples.
-
-### Integration Checklist
-
-- [ ] Choose an AI model / API (GPT-4 Vision, Gemini, Claude, etc.)
-- [ ] Write a system prompt referencing `docs/ai_scene_schema.md` schema
-- [ ] Add AI API key management (env vars, not committed)
-- [ ] Implement `server/routes/scene.ts` — send image buffer to AI, parse response
-- [ ] Handle AI errors gracefully (timeout, malformed JSON, rate limits)
-- [ ] Update `docs/backend_contract.md` to match actual SceneV1 schema
-- [ ] Update `SceneResponse` interface in `ai_proxy_service.ts`
-- [ ] Update `docs/testing_upload.md` example responses
-- [ ] Test end-to-end: photo → AI → Zod validation → preview → play
+| Path | Description |
+| --- | --- |
+| `src/services/ai_proxy_service.ts` | Frontend API client for `/api/scene` |
+| `src/services/supabase.ts` | Supabase client — share, fetch, browse levels |
 
 ---
 
-## Phaser Template Reference
+## Key Architecture Decisions
 
-This project was bootstrapped from the [Phaser React TypeScript template](https://github.com/phaserjs/template-react-ts).
+### Two-Stage Pipeline: AI Detection → Deterministic Builder
 
-### React Bridge
+The photo is sent to GPT-4o which only performs **object detection** (labels, bounding boxes, categories). It makes zero gameplay decisions. A separate deterministic `levelBuilder.ts` then arranges detected objects into a playable zigzag staircase layout with guaranteed reachability.
 
-`PhaserGame.tsx` initializes the Phaser game and bridges events between React and Phaser via `EventBus`.
+### Runtime Icon Generation
 
-### Handling Assets
+Game sprites are generated at runtime using Canvas 2D API. No external image assets needed — `IconTextureFactory` draws Lucide icon paths programmatically.
 
-Static files go in `public/assets`. Imported files are bundled by Vite:
+### Normalized Coordinates
 
-```js
-import logoImg from "./assets/logo.png";
-```
+All positions use normalized coordinates (0.0–1.0). The game world matches the photo's aspect ratio and `coords.ts` converts to world pixels.
 
-### Deploying to Production
+### React ↔ Phaser Bridge
 
-```bash
-npm run build
-# Upload contents of dist/ to your web server
-```
+An `EventBus` bridges React and Phaser. Mobile controls write to a shared `InputState` that Phaser reads each frame. Game events flow from Phaser to React.
 
-### About log.js
+---
 
-`log.js` sends anonymous usage data to Phaser Studio. To disable, use `npm run dev-nolog` or delete `log.js`.
+## Troubleshooting
 
-### Phaser Community
+| Problem | Solution |
+| --- | --- |
+| `OPENAI_API_KEY` error on startup | Make sure `.env` exists in the project root with a valid key |
+| AI returns errors / timeouts | Check your OpenAI billing — you need credit on your account |
+| Level sharing doesn't work | Supabase keys are optional; check `.env` has both `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` |
+| Can't type in share form inputs | Update to latest code — `disableGlobalCapture()` fix in GameScene.ts |
+| Mobile can't connect | Ensure phone and laptop are on the same Wi-Fi; use the `Network:` URL from terminal |
+| Port 8080 in use | Kill the other process or change the port in `vite/config.dev.mjs` |
 
-[phaser.io](https://phaser.io) | [Discord](https://discord.gg/phaser) | [Docs](https://newdocs.phaser.io)
+---
+
+## License
+
+MIT
