@@ -177,6 +177,63 @@ Open in your browser: [http://localhost:8080](http://localhost:8080)
 
 ---
 
+## Deploy to Vercel
+
+The project is pre-configured for Vercel. The `api/` directory contains a serverless function that replaces the Express backend in production.
+
+### 1. Push to GitHub
+
+Create a GitHub repository and push your code:
+
+```bash
+git init
+git add .
+git commit -m "initial commit"
+git remote add origin https://github.com/YOUR_USER/reality-jump.git
+git branch -M main
+git push -u origin main
+```
+
+### 2. Import in Vercel
+
+1. Go to [https://vercel.com](https://vercel.com) and sign in (GitHub SSO is easiest).
+2. Click **"Add New…" → "Project"**.
+3. Select your `reality-jump` repository from the list.
+4. Vercel auto-detects Vite — the defaults should work:
+   - **Framework Preset:** Vite
+   - **Build Command:** `npm run build`
+   - **Output Directory:** `dist`
+5. Click **"Deploy"**.
+
+### 3. Set environment variables
+
+The serverless function needs your OpenAI key (and optionally Supabase keys).
+
+1. In your Vercel project, go to **Settings → Environment Variables**.
+2. Add the following:
+
+| Name | Value | Required |
+| --- | --- | --- |
+| `OPENAI_API_KEY` | `sk-proj-...` | **Yes** |
+| `VITE_SUPABASE_URL` | `https://xxx.supabase.co` | No (for level sharing) |
+| `VITE_SUPABASE_ANON_KEY` | `eyJ...` | No (for level sharing) |
+
+3. Click **"Save"** and **redeploy** (Deployments → latest → "⋮" → Redeploy).
+
+> **Important:** `VITE_` prefixed variables are embedded into the frontend at build time. If you add or change them, you must redeploy for the changes to take effect.
+
+### 4. Verify
+
+Visit your deployment URL (e.g. `https://reality-jump.vercel.app`). Take a photo, and the AI scene generation should work end-to-end.
+
+### Notes
+
+- **Hobby plan timeout:** Vercel's free Hobby plan has a 10-second function timeout. The API uses `detail: 'low'` for GPT-4o vision to keep response times under this limit (~2–5 seconds). If you hit timeouts, upgrade to Pro (60s limit).
+- **No Express in production:** The `api/scene.ts` serverless function handles `/api/scene` directly. The Express server (`server/`) is only used for local development.
+- **`vercel.json`** is already configured with the correct rewrites — API routes go to the serverless function, everything else falls through to the SPA.
+
+---
+
 ## Available Commands
 
 | Command | Description |
