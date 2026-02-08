@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import formidable from 'formidable';
 import { readFileSync } from 'fs';
 import OpenAI from 'openai';
+import { buildLevel, DetectionResponse } from '../server/levelBuilder';
 
 const openai = new OpenAI(); // reads OPENAI_API_KEY from env
 
@@ -11,90 +12,33 @@ export const config = {
     },
 };
 
-const DESCRIBE_PROMPT = `You are a precise visual analyst. Study this photo carefully.
+// AI prompt: detection ONLY — no gameplay decisions
+const DETECTION_PROMPT = `You are an object detection AI. You receive a photo and detect objects in it.
 
-List EVERY distinct object you can see. For EACH object, provide:
-1. What it is (e.g. "wooden table", "laptop", "potted plant")
-2. Its approximate position as a fraction of the image (0.0-1.0 for both x and y, where 0,0 is top-left)
-3. Its approximate width and height as a fraction of the image
-4. Whether its TOP SURFACE is flat/horizontal (could someone stand on it?)
+RESPOND WITH ONLY VALID JSON — no markdown, no backticks, no explanation.
 
-Focus especially on:
-- Flat horizontal surfaces at different heights (tables, shelves, window sills, books, boxes) — these become PLATFORMS
-- Small items (cups, bottles, fruit, pens, toys) — these become COLLECTIBLES
-- Potentially dangerous items (sharp edges, electronics, hot surfaces) — these become HAZARDS
-- Large blocking items (chairs, bags, bins) — these become OBSTACLES
-- Plants and electronics — these are ENEMY SPAWN points
-
-Format your response as a numbered list. Be precise about positions.`;
-
-const GENERATE_PROMPT = `You are a game level designer for a 2D side-scrolling platformer called Reality Jump.
-
-You will receive a description of objects detected in a photo. Convert this into a playable platformer level.
-
-GAME DESIGN PRINCIPLES:
-- The player starts bottom-left and must reach an exit at top-right
-- Create a path of platforms the player can JUMP between to reach the exit
-- Platforms should be at DIFFERENT HEIGHTS creating a staircase-like path upward
-- Space platforms so the player can reach them with jumps (vertical gap ~0.10-0.20, horizontal gap ~0.15-0.30)
-- Place collectibles along the path to reward exploration
-- Place 1-2 enemies on wider platforms for challenge
-
-Return ONLY valid JSON (no markdown, no backticks, no explanation):
+Detect objects visible in the photo. For each object, return its label, category, confidence, and bounding box in normalized coordinates (0.0 to 1.0 relative to image dimensions).
 
 {
-  "version": 1,
-  "image": { "w": 1280, "h": 720 },
-  "objects": [
+  "image": { "w": <estimated_width>, "h": <estimated_height> },
+  "detections": [
     {
-      "id": "<unique_string>",
-      "type": "platform" | "obstacle" | "collectible" | "hazard",
-      "label": "<what the real-world object is>",
+      "label": "<what the object is>",
+      "category": "furniture | food | plant | electric | other",
       "confidence": <0.0-1.0>,
-      "bounds_normalized": { "x": <0.0-1.0>, "y": <0.0-1.0>, "w": <0.0-1.0>, "h": <0.0-1.0> },
-      "surface_type": "solid" | "soft",
-      "category": "furniture" | "food" | "plant" | "electric" | "other",
-      "enemy_spawn_anchor": <boolean>
+      "bounds_normalized": { "x": <left>, "y": <top>, "w": <width>, "h": <height> }
     }
-  ],
-  "spawns": {
-    "player": { "x": <0.0-1.0>, "y": <0.0-1.0> },
-    "exit": { "x": <0.0-1.0>, "y": <0.0-1.0> },
-    "enemies": [{ "x": <0.0-1.0>, "y": <0.0-1.0>, "type": "walker" }],
-    "pickups": [{ "x": <0.0-1.0>, "y": <0.0-1.0>, "type": "coin" | "health" }]
-  },
-  "rules": []
+  ]
 }
 
-COORDINATE RULES:
-- ALL coordinates normalized 0.0-1.0
-- bounds_normalized: x,y is the TOP-LEFT corner
-- Platform "h" MUST be thin: 0.02-0.06 (top walking surface only)
-- y-axis goes DOWN: y=0.0 is TOP, y=1.0 is BOTTOM
-
-PLATFORM LAYOUT (most important):
-- You MUST create a jumpable path from bottom-left to top-right
-- LOWEST platform around y=0.80-0.85 (near bottom)
-- HIGHEST platform around y=0.15-0.25 (near top, where exit goes)
-- Create 4-8 platforms at STAGGERED heights between these
-- Each platform must be reachable from at least one other platform
-- Minimum platform width: 0.10, typical: 0.15-0.35
-
-OBJECT LIMITS:
-- Max 25 total (12 platforms, 8 obstacles, 10 collectibles, 8 hazards)
-- MUST have at least 4 platforms
-- Unique ids: "plat_1", "obs_1", "col_1", "haz_1"
-
-CATEGORY & ENEMY ANCHORS:
-- enemy_spawn_anchor: true for "plant" or "electric" categories
-
-SPAWN RULES:
-- Player: bottom-left (x: 0.05-0.15, y: 0.75-0.85) ON a platform
-- Exit: top-right (x: 0.80-0.95, y: 0.10-0.25) ON a platform
-- 1-2 enemies "walker" ON wider platforms
-- 3-8 pickups (mix "coin"/"health") ON platforms
-
-CRITICAL: Level MUST be playable — player must be able to jump platform-to-platform from spawn to exit. Return ONLY JSON.`;
+RULES:
+- bounds_normalized: x,y is the top-left corner. w,h is width and height as fraction of image.
+- Detect ALL visible objects: tables, chairs, books, cups, plants, screens, cables, boxes, shelves, food, etc.
+- Estimate image dimensions from typical phone photos (e.g. 4032x3024). If unsure use 1280x720.
+- Return up to 15 detections, prioritizing larger and more distinct objects.
+- Be accurate with bounding boxes — they should tightly fit the object.
+- category must be one of: furniture, food, plant, electric, other.
+- Prefer detecting flat horizontal surfaces (tables, shelves, counters, desks, books, window sills) — these are the most important objects.`;
 
 function parseMultipart(req: VercelRequest): Promise<{ buffer: Buffer; mimetype: string }> {
     return new Promise((resolve, reject) => {
@@ -118,8 +62,12 @@ function parseMultipart(req: VercelRequest): Promise<{ buffer: Buffer; mimetype:
     });
 }
 
+/**
+ * POST /api/scene
+ * 1) AI detects objects in the photo
+ * 2) Deterministic level builder creates a playable SceneV1
+ */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-    // Only accept POST
     if (req.method !== 'POST') {
         return res.status(405).json({ error: 'Method not allowed' });
     }
@@ -134,56 +82,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const base64Image = buffer.toString('base64');
         const dataUrl = `data:${mimetype};base64,${base64Image}`;
 
-        // === PASS 1: Describe the image ===
-        console.log(`[${timestamp}] request=${requestId} Pass 1: describing image...`);
+        // === AI: Detect objects in the photo ===
+        console.log(`[${timestamp}] request=${requestId} sending to GPT-4o for object detection...`);
 
-        const describeResult = await openai.chat.completions.create({
+        const completion = await openai.chat.completions.create({
             model: 'gpt-4o',
             max_tokens: 1500,
             temperature: 0.2,
             messages: [
-                { role: 'system', content: DESCRIBE_PROMPT },
+                { role: 'system', content: DETECTION_PROMPT },
                 {
                     role: 'user',
                     content: [
-                        { type: 'text', text: 'Describe all objects in this photo with their positions.' },
+                        { type: 'text', text: 'Detect all objects in this photo.' },
                         { type: 'image_url', image_url: { url: dataUrl, detail: 'high' } },
                     ],
                 },
             ],
         });
 
-        const description = describeResult.choices?.[0]?.message?.content;
-        if (!description) {
-            console.error(`[${timestamp}] request=${requestId} Pass 1: empty response`);
-            return res.status(502).json({ error: 'AI returned empty description' });
-        }
-
-        console.log(`[${timestamp}] request=${requestId} Pass 1 done (${description.length} chars)`);
-
-        // === PASS 2: Generate level JSON from description ===
-        console.log(`[${timestamp}] request=${requestId} Pass 2: generating level...`);
-
-        const generateResult = await openai.chat.completions.create({
-            model: 'gpt-4o',
-            max_tokens: 2500,
-            temperature: 0.3,
-            messages: [
-                { role: 'system', content: GENERATE_PROMPT },
-                {
-                    role: 'user',
-                    content: `Here are the objects detected in the photo:\n\n${description}\n\nGenerate a playable platformer level JSON based on these objects.`,
-                },
-            ],
-        });
-
-        const raw = generateResult.choices?.[0]?.message?.content;
+        const raw = completion.choices?.[0]?.message?.content;
         if (!raw) {
-            console.error(`[${timestamp}] request=${requestId} Pass 2: empty response`);
-            return res.status(502).json({ error: 'AI returned empty level data' });
+            console.error(`[${timestamp}] request=${requestId} empty AI response`);
+            return res.status(502).json({ error: 'Empty response from AI' });
         }
 
-        console.log(`[${timestamp}] request=${requestId} Pass 2 done (${raw.length} chars)`);
+        console.log(`[${timestamp}] request=${requestId} AI detection done (${raw.length} chars)`);
 
         // Strip markdown fences if present
         let cleaned = raw.trim();
@@ -191,9 +115,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             cleaned = cleaned.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?\s*```$/, '');
         }
 
-        let parsed: unknown;
+        let detections: DetectionResponse;
         try {
-            parsed = JSON.parse(cleaned);
+            detections = JSON.parse(cleaned) as DetectionResponse;
         } catch (parseErr) {
             console.error(`[${timestamp}] request=${requestId} JSON parse error:`, parseErr);
             return res.status(502).json({
@@ -203,8 +127,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             });
         }
 
-        console.log(`[${timestamp}] request=${requestId} response sent status=200`);
-        return res.status(200).json(parsed);
+        if (!detections.image || !Array.isArray(detections.detections)) {
+            console.error(`[${timestamp}] request=${requestId} invalid detection structure`);
+            return res.status(502).json({ error: 'AI returned unexpected structure' });
+        }
+
+        console.log(`[${timestamp}] request=${requestId} detected ${detections.detections.length} objects, building level...`);
+
+        // === Deterministic level builder ===
+        const scene = buildLevel(detections);
+
+        console.log(`[${timestamp}] request=${requestId} level built: ${scene.objects.length} objects, ${scene.spawns.pickups.length} pickups, ${scene.spawns.enemies.length} enemies`);
+        return res.status(200).json(scene);
 
     } catch (err: unknown) {
         const apiErr = err as { status?: number; message?: string };
